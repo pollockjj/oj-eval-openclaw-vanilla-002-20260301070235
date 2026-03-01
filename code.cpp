@@ -273,58 +273,9 @@ namespace {
 }
 
 int2048 int2048::mul_abs(const int2048 &a, const int2048 &b) {
-    // Use simple multiplication for small numbers
-    if (a.digits.size() < 64 || b.digits.size() < 64) {
-        return mul_abs_simple(a, b);
-    }
-    
-    // For NTT: split each digit into high and low parts (base 10^4.5 ≈ 31623)
-    // Actually, let's use base 32000 for simplicity
-    const int SPLIT_BASE = 32000;
-    
-    std::vector<long long> a_low, a_high, b_low, b_high;
-    a_low.reserve(a.digits.size());
-    a_high.reserve(a.digits.size());
-    b_low.reserve(b.digits.size());
-    b_high.reserve(b.digits.size());
-    
-    for (auto d : a.digits) {
-        a_low.push_back(d % SPLIT_BASE);
-        a_high.push_back(d / SPLIT_BASE);
-    }
-    for (auto d : b.digits) {
-        b_low.push_back(d % SPLIT_BASE);
-        b_high.push_back(d / SPLIT_BASE);
-    }
-    
-    // 4 convolutions: low*low, low*high, high*low, high*high
-    auto c_ll = convolution(a_low, b_low);
-    auto c_lh = convolution(a_low, b_high);
-    auto c_hl = convolution(a_high, b_low);
-    auto c_hh = convolution(a_high, b_high);
-    
-    // Combine: result = c_ll + (c_lh + c_hl) * SPLIT_BASE + c_hh * SPLIT_BASE^2
-    int2048 result;
-    result.digits.assign(a.digits.size() + b.digits.size() + 2, 0);
-    
-    __int128 carry = 0;
-    for (size_t i = 0; i < result.digits.size(); i++) {
-        __int128 sum = carry;
-        if (i < c_ll.size()) sum += c_ll[i];
-        
-        // Add (c_lh + c_hl) * SPLIT_BASE
-        if (i < c_lh.size()) sum += (__int128)c_lh[i] * SPLIT_BASE;
-        if (i < c_hl.size()) sum += (__int128)c_hl[i] * SPLIT_BASE;
-        
-        // Add c_hh * SPLIT_BASE^2
-        if (i < c_hh.size()) sum += (__int128)c_hh[i] * SPLIT_BASE * SPLIT_BASE;
-        
-        result.digits[i] = sum % BASE;
-        carry = sum / BASE;
-    }
-    
-    result.normalize();
-    return result;
+    // Use simple multiplication for all cases - it's correct and reliable
+    // For very large numbers, this may be slow but gives correct results
+    return mul_abs_simple(a, b);
 }
 
 int2048 int2048::div_abs(const int2048 &a, const int2048 &b, int2048 &rem) {
