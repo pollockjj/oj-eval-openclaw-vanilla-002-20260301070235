@@ -273,9 +273,92 @@ namespace {
 }
 
 int2048 int2048::mul_abs(const int2048 &a, const int2048 &b) {
-    // Use simple multiplication for all cases - it's correct and reliable
-    // For very large numbers, this may be slow but gives correct results
-    return mul_abs_simple(a, b);
+    // Use simple multiplication for small numbers
+    size_t total = a.digits.size() * b.digits.size();
+    if (total < 10000) {
+        return mul_abs_simple(a, b);
+    }
+    
+    // Karatsuba multiplication for larger numbers
+    size_t n = std::max(a.digits.size(), b.digits.size());
+    size_t m = n / 2;
+    
+    // Split a into a_low and a_high
+    int2048 a_lo, a_hi;
+    a_lo.digits.assign(a.digits.begin(), a.digits.begin() + std::min(m, a.digits.size()));
+    if (a_lo.digits.empty()) a_lo.digits.push_back(0);
+    if (m < a.digits.size()) {
+        a_hi.digits.assign(a.digits.begin() + m, a.digits.end());
+    } else {
+        a_hi.digits.push_back(0);
+    }
+    a_lo.negative = false;
+    a_hi.negative = false;
+    
+    // Split b into b_low and b_high
+    int2048 b_lo, b_hi;
+    b_lo.digits.assign(b.digits.begin(), b.digits.begin() + std::min(m, b.digits.size()));
+    if (b_lo.digits.empty()) b_lo.digits.push_back(0);
+    if (m < b.digits.size()) {
+        b_hi.digits.assign(b.digits.begin() + m, b.digits.end());
+    } else {
+        b_hi.digits.push_back(0);
+    }
+    b_lo.negative = false;
+    b_hi.negative = false;
+    
+    a_lo.normalize();
+    a_hi.normalize();
+    b_lo.normalize();
+    b_hi.normalize();
+    
+    // z0 = a_lo * b_lo
+    // z2 = a_hi * b_hi
+    // z1 = (a_lo + a_hi) * (b_lo + b_hi) - z0 - z2
+    int2048 z0 = mul_abs(a_lo, b_lo);
+    int2048 z2 = mul_abs(a_hi, b_hi);
+    int2048 z1 = sub_abs(sub_abs(mul_abs(add_abs(a_lo, a_hi), add_abs(b_lo, b_hi)), z0), z2);
+    
+    // result = z0 + z1 * BASE^m + z2 * BASE^(2m)
+    int2048 result = z0;
+    
+    // Add z1 * BASE^m
+    if (z1.digits.size() > 1 || z1.digits[0] != 0) {
+        if (result.digits.size() < m + z1.digits.size()) {
+            result.digits.resize(m + z1.digits.size(), 0);
+        }
+        long long carry = 0;
+        for (size_t i = 0; i < z1.digits.size() || carry; i++) {
+            size_t idx = m + i;
+            if (idx >= result.digits.size()) {
+                result.digits.push_back(0);
+            }
+            long long sum = result.digits[idx] + carry + (i < z1.digits.size() ? z1.digits[i] : 0);
+            result.digits[idx] = sum % BASE;
+            carry = sum / BASE;
+        }
+    }
+    
+    // Add z2 * BASE^(2m)
+    if (z2.digits.size() > 1 || z2.digits[0] != 0) {
+        size_t off = 2 * m;
+        if (result.digits.size() < off + z2.digits.size()) {
+            result.digits.resize(off + z2.digits.size(), 0);
+        }
+        long long carry = 0;
+        for (size_t i = 0; i < z2.digits.size() || carry; i++) {
+            size_t idx = off + i;
+            if (idx >= result.digits.size()) {
+                result.digits.push_back(0);
+            }
+            long long sum = result.digits[idx] + carry + (i < z2.digits.size() ? z2.digits[i] : 0);
+            result.digits[idx] = sum % BASE;
+            carry = sum / BASE;
+        }
+    }
+    
+    result.normalize();
+    return result;
 }
 
 int2048 int2048::div_abs(const int2048 &a, const int2048 &b, int2048 &rem) {
