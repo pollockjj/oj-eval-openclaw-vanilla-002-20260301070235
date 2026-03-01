@@ -105,86 +105,118 @@ int2048 int2048::mul_abs_simple(const int2048 &a, const int2048 &b) {
     return r;
 }
 
+// NTT-based multiplication for large numbers
+namespace {
+    const long long NTT_MOD = 998244353;
+    const long long NTT_G = 3;
+    
+    long long mod_pow(long long a, long long b, long long m) {
+        long long res = 1;
+        a %= m;
+        while (b > 0) {
+            if (b & 1) res = res * a % m;
+            a = a * a % m;
+            b >>= 1;
+        }
+        return res;
+    }
+    
+    void ntt(std::vector<long long>& a, bool inv) {
+        int n = a.size();
+        for (int i = 1, j = 0; i < n; i++) {
+            int bit = n >> 1;
+            for (; j & bit; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if (i < j) std::swap(a[i], a[j]);
+        }
+        
+        for (int len = 2; len <= n; len <<= 1) {
+            long long w = inv ? mod_pow(NTT_G, NTT_MOD - 1 - (NTT_MOD - 1) / len, NTT_MOD)
+                              : mod_pow(NTT_G, (NTT_MOD - 1) / len, NTT_MOD);
+            for (int i = 0; i < n; i += len) {
+                long long wn = 1;
+                for (int j = 0; j < len / 2; j++) {
+                    long long u = a[i + j];
+                    long long v = a[i + j + len / 2] * wn % NTT_MOD;
+                    a[i + j] = (u + v) % NTT_MOD;
+                    a[i + j + len / 2] = (u - v + NTT_MOD) % NTT_MOD;
+                    wn = wn * w % NTT_MOD;
+                }
+            }
+        }
+        
+        if (inv) {
+            long long n_inv = mod_pow(n, NTT_MOD - 2, NTT_MOD);
+            for (int i = 0; i < n; i++) a[i] = a[i] * n_inv % NTT_MOD;
+        }
+    }
+    
+    std::vector<long long> convolution(const std::vector<long long>& a, const std::vector<long long>& b) {
+        int n = 1;
+        while (n < (int)(a.size() + b.size())) n <<= 1;
+        
+        std::vector<long long> fa(a.begin(), a.end()), fb(b.begin(), b.end());
+        fa.resize(n);
+        fb.resize(n);
+        
+        ntt(fa, false);
+        ntt(fb, false);
+        for (int i = 0; i < n; i++) fa[i] = fa[i] * fb[i] % NTT_MOD;
+        ntt(fa, true);
+        
+        return fa;
+    }
+}
+
 int2048 int2048::mul_abs(const int2048 &a, const int2048 &b) {
-    // Use Karatsuba for larger numbers
+    // Use simple multiplication for small numbers
     if (a.digits.size() < 64 || b.digits.size() < 64) {
         return mul_abs_simple(a, b);
     }
     
-    // Karatsuba multiplication
-    size_t n = std::max(a.digits.size(), b.digits.size());
-    size_t m = n / 2;
+    // For NTT: split each digit into high and low parts (base 10^4.5 ≈ 31623)
+    // Actually, let's use base 32000 for simplicity
+    const int SPLIT_BASE = 32000;
     
-    // Split a into a_low and a_high
-    int2048 a_lo, a_hi;
-    a_lo.digits.assign(a.digits.begin(), a.digits.begin() + std::min(m, a.digits.size()));
-    if (a_lo.digits.empty()) a_lo.digits.push_back(0);
+    std::vector<long long> a_low, a_high, b_low, b_high;
+    a_low.reserve(a.digits.size());
+    a_high.reserve(a.digits.size());
+    b_low.reserve(b.digits.size());
+    b_high.reserve(b.digits.size());
     
-    if (m < a.digits.size()) {
-        a_hi.digits.assign(a.digits.begin() + m, a.digits.end());
-    } else {
-        a_hi.digits.push_back(0);
+    for (auto d : a.digits) {
+        a_low.push_back(d % SPLIT_BASE);
+        a_high.push_back(d / SPLIT_BASE);
+    }
+    for (auto d : b.digits) {
+        b_low.push_back(d % SPLIT_BASE);
+        b_high.push_back(d / SPLIT_BASE);
     }
     
-    // Split b into b_low and b_high
-    int2048 b_lo, b_hi;
-    b_lo.digits.assign(b.digits.begin(), b.digits.begin() + std::min(m, b.digits.size()));
-    if (b_lo.digits.empty()) b_lo.digits.push_back(0);
+    // 4 convolutions: low*low, low*high, high*low, high*high
+    auto c_ll = convolution(a_low, b_low);
+    auto c_lh = convolution(a_low, b_high);
+    auto c_hl = convolution(a_high, b_low);
+    auto c_hh = convolution(a_high, b_high);
     
-    if (m < b.digits.size()) {
-        b_hi.digits.assign(b.digits.begin() + m, b.digits.end());
-    } else {
-        b_hi.digits.push_back(0);
-    }
+    // Combine: result = c_ll + (c_lh + c_hl) * SPLIT_BASE + c_hh * SPLIT_BASE^2
+    int2048 result;
+    result.digits.assign(a.digits.size() + b.digits.size() + 2, 0);
     
-    a_lo.normalize();
-    a_hi.normalize();
-    b_lo.normalize();
-    b_hi.normalize();
-    
-    // z0 = a_lo * b_lo
-    // z2 = a_hi * b_hi
-    // z1 = (a_lo + a_hi) * (b_lo + b_hi) - z0 - z2
-    int2048 z0 = mul_abs(a_lo, b_lo);
-    int2048 z2 = mul_abs(a_hi, b_hi);
-    int2048 z1 = sub_abs(sub_abs(mul_abs(add_abs(a_lo, a_hi), add_abs(b_lo, b_hi)), z0), z2);
-    
-    // result = z0 + z1 * BASE^m + z2 * BASE^(2m)
-    int2048 result = z0;
-    
-    // Add z1 * BASE^m
-    if (z1.digits.size() > 1 || z1.digits[0] != 0) {
-        if (result.digits.size() < m + z1.digits.size()) {
-            result.digits.resize(m + z1.digits.size(), 0);
-        }
-        long long carry = 0;
-        for (size_t i = 0; i < z1.digits.size() || carry; i++) {
-            size_t idx = m + i;
-            if (idx >= result.digits.size()) {
-                result.digits.push_back(0);
-            }
-            long long sum = result.digits[idx] + carry + (i < z1.digits.size() ? z1.digits[i] : 0);
-            result.digits[idx] = sum % BASE;
-            carry = sum / BASE;
-        }
-    }
-    
-    // Add z2 * BASE^(2m)
-    if (z2.digits.size() > 1 || z2.digits[0] != 0) {
-        size_t off = 2 * m;
-        if (result.digits.size() < off + z2.digits.size()) {
-            result.digits.resize(off + z2.digits.size(), 0);
-        }
-        long long carry = 0;
-        for (size_t i = 0; i < z2.digits.size() || carry; i++) {
-            size_t idx = off + i;
-            if (idx >= result.digits.size()) {
-                result.digits.push_back(0);
-            }
-            long long sum = result.digits[idx] + carry + (i < z2.digits.size() ? z2.digits[i] : 0);
-            result.digits[idx] = sum % BASE;
-            carry = sum / BASE;
-        }
+    __int128 carry = 0;
+    for (size_t i = 0; i < result.digits.size(); i++) {
+        __int128 sum = carry;
+        if (i < c_ll.size()) sum += c_ll[i];
+        
+        // Add (c_lh + c_hl) * SPLIT_BASE
+        if (i < c_lh.size()) sum += (__int128)c_lh[i] * SPLIT_BASE;
+        if (i < c_hl.size()) sum += (__int128)c_hl[i] * SPLIT_BASE;
+        
+        // Add c_hh * SPLIT_BASE^2
+        if (i < c_hh.size()) sum += (__int128)c_hh[i] * SPLIT_BASE * SPLIT_BASE;
+        
+        result.digits[i] = sum % BASE;
+        carry = sum / BASE;
     }
     
     result.normalize();
