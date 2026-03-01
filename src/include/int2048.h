@@ -14,12 +14,20 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <iomanip>
+#include <algorithm>
 
 // Do not use "using namespace std;"
 
 namespace sjtu {
 class int2048 {
-  // todo
+private:
+  std::vector<long long> digits;  // Little-endian: digits[0] is least significant
+  bool negative;                   // true if negative
+  
+  static const long long BASE = 1000000000LL;  // 10^9
+  static const int BASE_DIGITS = 9;
+
 public:
   // Constructors
   int2048();
@@ -81,6 +89,16 @@ public:
   friend bool operator>(const int2048 &, const int2048 &);
   friend bool operator<=(const int2048 &, const int2048 &);
   friend bool operator>=(const int2048 &, const int2048 &);
+  
+private:
+  // Helper functions
+  void normalize();
+  int compare_abs(const int2048 &) const;
+  static int2048 add_abs(const int2048 &, const int2048 &);
+  static int2048 sub_abs(const int2048 &, const int2048 &);  // assumes |a| >= |b|
+  static int2048 mul_abs(const int2048 &, const int2048 &);
+  static int2048 mul_abs_simple(const int2048 &, const int2048 &);
+  static int2048 div_abs(const int2048 &, const int2048 &, int2048 &rem);
 };
 } // namespace sjtu
 
